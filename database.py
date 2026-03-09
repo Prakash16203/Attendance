@@ -156,3 +156,4 @@ class StrikeEvent(Base):
 # ── Helper function to create tables (call once) ──────────────────
 def init_db():
     Base.metadata.create_all(bind=engine)
+
