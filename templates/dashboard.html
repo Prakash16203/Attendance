@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Labour Attendance System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    .nav-tabs .nav-link { font-weight: 500; }
+    .status-present { background-color: #d4edda; color: #155724; }
+    .status-absent { background-color: #f8d7da; color: #721c24; }
+    .status-half { background-color: #fff3cd; color: #856404; }
+    .feedback-good { background-color: #d4edda; color: #155724; font-size: 0.8rem; }
+    .feedback-bad { background-color: #f8d7da; color: #721c24; font-size: 0.8rem; }
+    .feedback-group { margin-bottom: 1.2rem; border-left: 3px solid #ccc; padding-left: 12px; }
+    .checklist-item { font-size: 0.9rem; margin-left: 10px; }
+    input[type="number"] { width: 110px; }
+    .feedback-column { min-width: 180px; text-align: center; vertical-align: middle; }
+    .score-radio-group label { margin-right: 1.2rem; font-weight: 500; }
+    .points-positive { background-color: #198754; color: white; }
+    .points-negative { background-color: #dc3545; color: white; }
+    .points-neutral { background-color: #6c757d; color: white; }
+    .modal-body { max-height: 75vh; overflow-y: auto; }
+    .break-on { background-color: #fff3cd; color: #856404; }
+    .break-off { background-color: #e9ecef; }
+
+    /* Strike badge styles */
+    .strike-badge {
+      display: inline-block;
+      padding: 0.35em 0.65em;
+      font-size: 0.75em;
+      font-weight: 700;
+      line-height: 1;
+      text-align: center;
+      white-space: nowrap;
+      vertical-align: baseline;
+      border-radius: 0.375rem;
+      margin-left: 0.5rem;
+    }
+    
+    .strike-0 { background-color: #198754; color: white; }
+    .strike-1 { background-color: #ffc107; color: black; }
+    .strike-2 { background-color: #fd7e14; color: white; }
+    .strike-3 { background-color: #dc3545; color: white; }
+    .strike-4 { background-color: #6f42c1; color: white; }
+  </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="#">Labour Attendance</a>
+    <div class="ms-auto">
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container mt-4">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <h2 class="mb-4 text-center">Dashboard – {{ today_date }}</h2>
+
+  <ul class="nav nav-tabs mb-4" id="myTab" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="today-tab" data-bs-toggle="tab" data-bs-target="#today" type="button" role="tab">Today's Attendance</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="reports-tab" data-bs-toggle="tab" data-bs-target="#reports" type="button" role="tab">Reports / History</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="add-tab" data-bs-toggle="tab" data-bs-target="#add" type="button" role="tab">Add Labour</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="myTabContent">
+
+    <!-- ==================== Tab 1: Today's Attendance ==================== -->
+    <div class="tab-pane fade show active" id="today" role="tabpanel">
+      <div class="d-flex justify-content-between mb-3">
+        <h5>Mark Attendance for {{ today_date }}</h5>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="tab" data-bs-target="#add">+ Add Labour</button>
+      </div>
+
+      <form method="POST" action="{{ url_for('mark_attendance') }}" id="attendanceForm">
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+              <tr>
+                <th style="width:150px">Status</th>
+                <th>Name</th>
+                <th>Surname</th>
+                <th>Phone</th>
+                <th style="width:140px">Advance (₹)</th>
+                <th style="width:160px">Break (min)</th>
+                <th class="feedback-column">Feedback</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if labours %}
+                {% for labour in labours %}
+                {% set row = today_data.get(labour.id, {}) %}
+                {% set fb = row.feedback or {} %}
+                {% set breaks = row.breaks | default([]) %}
+                {% set total_break = breaks | map(attribute='duration') | sum | int(0) %}
+                {% set is_on_break = breaks | length > 0 and breaks[-1].end is none %}
+                {% set strikes = labour_strikes.get(labour.id, {'total': 0}) %}
+                {% set is_frozen = row.frozen | default(false) %}
+
+                <tr data-labour-id="{{ labour.id }}">
+                  <td>
+                    <select name="status_{{ labour.id }}" class="form-select" {% if is_frozen %}disabled{% endif %}>
+                      <option value="Present" {% if row.status == 'Present' %}selected{% endif %}>Present</option>
+                      <option value="Absent" {% if row.status == 'Absent' %}selected{% endif %}>Absent</option>
+                      <option value="Half Day" {% if row.status == 'Half Day' %}selected{% endif %}>Half Day</option>
+                    </select>
+                  </td>
+                  <td>
+                    {{ labour.name }} {{ labour.surname }}
+                    {% if strikes.total > 0 %}
+                      <span class="strike-badge strike-{{ strikes.total if strikes.total <= 3 else 4 }}">
+                        ⚠️ {{ strikes.total }}
+                      </span>
+                    {% else %}
+                      <span class="strike-badge strike-0">✓ 0</span>
+                    {% endif %}
+                  </td>
+                  <td>{{ labour.surname }}</td>
+                  <td>{{ labour.phone or '-' }}</td>
+                  <td>
+                    <input type="number" step="0.01" min="0" name="advance_{{ labour.id }}"
+                           class="form-control text-end" placeholder="0"
+                           value="{{ row.advance if row.advance is not none else '' }}">
+                  </td>
+                  <td class="{% if is_on_break %}break-on{% else %}break-off{% endif %}" 
+                      id="break-cell-{{ labour.id }}">
+                    {% if is_on_break %}
+                      <strong>ON</strong><br>
+                      <small>since {{ breaks[-1].start.strftime('%H:%M') if breaks else '' }}</small>
+                    {% else %}
+                      {{ total_break }} min
+                    {% endif %}
+                    <div class="form-check form-switch mt-2">
+                      <input class="form-check-input break-toggle" type="checkbox"
+                             id="break_switch_{{ labour.id }}" {% if is_on_break %}checked{% endif %}
+                             data-labour-id="{{ labour.id }}">
+                      <label class="form-check-label small" for="break_switch_{{ labour.id }}">On break</label>
+                    </div>
+                  </td>
+                  <td class="feedback-column">
+                    <button type="button" class="btn btn-outline-primary btn-sm"
+                            data-bs-toggle="modal" data-bs-target="#feedbackModal_{{ labour.id }}">
+                      Feedback
+                    </button>
+                  </td>
+                </tr>
+
+                <!-- Feedback Modal -->
+                <div class="modal fade" id="feedbackModal_{{ labour.id }}" tabindex="-1" aria-labelledby="feedbackModalLabel_{{ labour.id }}" aria-hidden="true">
+                  <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                      <div class="modal-header">
+                        <h5 class="modal-title" id="feedbackModalLabel_{{ labour.id }}">
+                          Feedback for {{ labour.name }} {{ labour.surname }}
+                          {% if strikes.total > 0 %}
+                            <span class="strike-badge strike-{{ strikes.total if strikes.total <= 3 else 4 }} ms-2">
+                              ⚠️ {{ strikes.total }} strike{{ 's' if strikes.total != 1 else '' }}
+                            </span>
+                          {% endif %}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                      </div>
+                      <div class="modal-body">
+                        {% set category_index = namespace(value=0) %}
+                        {% for category, items in feedback_structure.items() %}
+                          {% set category_index.value = category_index.value + 1 %}
+                          <div class="feedback-group">
+                            <strong>{{ category }}</strong>
+                            <div class="score-radio-group mt-2 mb-3">
+                              <strong>Score: </strong>
+                              <input type="radio" name="score_{{ labour.id }}_{{ category_index.value }}" value="1"
+                                     id="score_pos_{{ labour.id }}_{{ category_index.value }}"
+                                     {% if row.category_scores is defined and row.category_scores.get(category_index.value) == 1 %}checked{% endif %}>
+                              <label for="score_pos_{{ labour.id }}_{{ category_index.value }}">+1</label>
+                              <input type="radio" name="score_{{ labour.id }}_{{ category_index.value }}" value="0"
+                                     id="score_neu_{{ labour.id }}_{{ category_index.value }}"
+                                     {% if row.category_scores is not defined or row.category_scores.get(category_index.value) == 0 or row.category_scores.get(category_index.value) is none %}checked{% endif %}>
+                              <label for="score_neu_{{ labour.id }}_{{ category_index.value }}">0</label>
+                              <input type="radio" name="score_{{ labour.id }}_{{ category_index.value }}" value="-1"
+                                     id="score_neg_{{ labour.id }}_{{ category_index.value }}"
+                                     {% if row.category_scores is defined and row.category_scores.get(category_index.value) == -1 %}checked{% endif %}>
+                              <label for="score_neg_{{ labour.id }}_{{ category_index.value }}">-1</label>
+                            </div>
+                            {% for item in items %}
+                              <div class="form-check checklist-item">
+                                <input class="form-check-input" type="checkbox"
+                                       name="fb_{{ labour.id }}_{{ loop.index0 }}_{{ category_index.value }}"
+                                       id="fb_{{ labour.id }}_{{ category }}_{{ loop.index0 }}"
+                                       {% if fb.get(item) %}checked{% endif %}>
+                                <label class="form-check-label" for="fb_{{ labour.id }}_{{ category }}_{{ loop.index0 }}">
+                                  {{ item }}
+                                </label>
+                              </div>
+                            {% endfor %}
+                          </div>
+                        {% endfor %}
+                      </div>
+                      <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-5">No labours added yet. Please add some labours first.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+
+        {% if labours %}
+          <button type="submit" class="btn btn-success mt-3 w-100">Save Today's Attendance & Scores</button>
+        {% endif %}
+      </form>
+    </div>
+
+    <!-- ==================== Tab 2: Reports / History ==================== -->
+    <div class="tab-pane fade" id="reports" role="tabpanel">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Attendance History</h5>
+        <div>
+          <button class="btn btn-success btn-sm me-2" onclick="exportReport('excel')">
+            <i class="bi bi-file-excel-fill"></i> Export Excel
+          </button>
+          <button class="btn btn-info btn-sm" onclick="exportReport('csv')">
+            <i class="bi bi-filetype-csv"></i> Export CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter Section -->
+      <div class="card mb-4">
+        <div class="card-body">
+          <form method="GET" action="{{ url_for('dashboard') }}" id="filterForm" class="row g-3">
+            <input type="hidden" name="_anchor" value="reports">
+
+            <div class="col-md-3">
+              <label class="form-label">Select Labour</label>
+              <select name="filter_labour" class="form-select">
+                <option value="all" {% if filter_labour == 'all' %}selected{% endif %}>All Labours</option>
+                {% for labour in labours %}
+                  <option value="{{ labour.id }}" {% if filter_labour == labour.id|string %}selected{% endif %}>
+                    {{ labour.name }} {{ labour.surname }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">From Date</label>
+              <input type="date" name="from_date" class="form-control" value="{{ filter_from }}">
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">To Date</label>
+              <input type="date" name="to_date" class="form-control" value="{{ filter_to }}">
+            </div>
+
+            <div class="col-md-3 d-flex align-items-end">
+              <button type="submit" class="btn btn-primary me-2">Apply Filter</button>
+              <a href="{{ url_for('dashboard') }}#reports" class="btn btn-secondary">Reset</a>
+            </div>
+          </form>
+        </div>
+      </div>
+
+            <!-- Summary Cards - FIXED Total Days (no 'do' tag) -->
+      {% set ns = namespace(total_days=0, total_present=0, total_absent=0, total_half=0, 
+                           total_points_sum=0, total_advance=0, total_break=0, total_strikes=0) %}
+
+      <!-- Collect unique dates without 'do' -->
+      {% set seen_dates = {} %}
+      {% for dt in history.keys() %}
+        {% if dt not in seen_dates %}
+          {% set _ = seen_dates.update({dt: 1}) %}
+        {% endif %}
+      {% endfor %}
+      {% set ns.total_days = seen_dates | length %}
+
+      <!-- Rest of summary calculations -->
+      {% for dt in history.keys() | sort(reverse=true) %}
+        {% for lid, data in history[dt].items() %}
+          {% if data.status == 'Present' %}{% set ns.total_present = ns.total_present + 1 %}{% endif %}
+          {% if data.status == 'Absent' %}{% set ns.total_absent = ns.total_absent + 1 %}{% endif %}
+          {% if data.status == 'Half Day' %}{% set ns.total_half = ns.total_half + 1 %}{% endif %}
+          {% set ns.total_points_sum = ns.total_points_sum + (data.total_points|default(0)) %}
+          {% set ns.total_advance = ns.total_advance + (data.advance|float(0)) %}
+          {% set ns.total_break = ns.total_break + (data.total_break_minutes | default(0)) %}
+        {% endfor %}
+      {% endfor %}
+      
+      <!-- Total strikes -->
+      {% for labour in labours %}
+        {% if labour.id in labour_strikes %}
+          {% set ns.total_strikes = ns.total_strikes + labour_strikes[labour.id].total %}
+        {% endif %}
+      {% endfor %}
+
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <div class="card text-white bg-primary mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Total Days</h5>
+              <h3>{{ ns.total_days }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-success mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Present</h5>
+              <h3>{{ ns.total_present }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-danger mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Absent</h5>
+              <h3>{{ ns.total_absent }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-warning mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Half Days</h5>
+              <h3>{{ ns.total_half }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-info mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Total Points</h5>
+              <h3 class="{% if ns.total_points_sum > 0 %}text-success{% elif ns.total_points_sum < 0 %}text-danger{% else %}text-white{% endif %}">
+                {{ ns.total_points_sum }}
+              </h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-secondary mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Total Advance</h5>
+              <h3>₹{{ "%.2f"|format(ns.total_advance) }}</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white bg-dark mb-3">
+            <div class="card-body">
+              <h5 class="card-title">Total Break</h5>
+              <h3>{{ ns.total_break }} min</h3>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card text-white" style="background-color: #6f42c1;">
+            <div class="card-body">
+              <h5 class="card-title">Total Strikes</h5>
+              <h3>{{ ns.total_strikes }}</h3>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed Records (unchanged) -->
+      <div class="alert alert-info">
+        <strong>Debug:</strong> 
+        Found {{ history.keys() | length }} date(s) in history
+        {% if history %}
+          {% for dt in history.keys() | sort(reverse=true) %}
+            <br>- {{ dt }}: {{ history[dt].keys() | length }} labour record(s)
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      {% if history %}
+        {% for dt in history.keys() | sort(reverse=true) %}
+          <div class="card mb-4">
+            <div class="card-header bg-info text-white">
+              {{ dt }}
+            </div>
+            <div class="card-body">
+              <ul class="list-group list-group-flush">
+                {% for lid, data in history[dt].items() %}
+                  {% set labour = labours | selectattr("id", "equalto", lid) | first %}
+                  {% if labour %}
+                    {% set total_points = data.total_points | default(0) %}
+                    {% set total_break = data.total_break_minutes | default(0) %}
+                    {% set strikes = labour_strikes.get(lid, {'total': 0}) %}
+
+                    <li class="list-group-item">
+                      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                        <div>
+                          <strong>{{ labour.name }} {{ labour.surname }}</strong>
+                          {% if strikes.total > 0 %}
+                            <span class="strike-badge strike-{{ strikes.total if strikes.total <= 3 else 4 }}">
+                              ⚠️ {{ strikes.total }}
+                            </span>
+                          {% else %}
+                            <span class="strike-badge strike-0">✓ 0</span>
+                          {% endif %}
+                          <br>
+                          <small class="text-muted">{{ labour.phone or 'No phone' }}</small>
+                        </div>
+                        <div class="text-end">
+                          <span class="badge me-2
+                            {% if data.status == 'Present' %}bg-success
+                            {% elif data.status == 'Absent' %}bg-danger
+                            {% else %}bg-warning text-dark{% endif %}">
+                            {{ data.status or '—' }}
+                          </span>
+                          <span class="badge bg-secondary me-2">
+                            ₹{{ data.advance|float(0) }}
+                          </span>
+                          <span class="badge me-2
+                            {% if total_points > 0 %}bg-success
+                            {% elif total_points < 0 %}bg-danger
+                            {% else %}bg-secondary{% endif %}">
+                            Points: {{ total_points }}
+                          </span>
+                          <span class="badge bg-dark">
+                            Break: {{ total_break }} min
+                          </span>
+                        </div>
+                      </div>
+
+                      {% if data.category_scores %}
+                        <div class="mt-2 small">
+                          <strong>Category Scores:</strong>
+                          <div class="d-flex flex-wrap gap-2 mt-1">
+                            {% for cat_name in category_names %}
+                              {% set cat_idx = loop.index %}
+                              {% set score = data.category_scores.get(cat_idx, 0) %}
+                              <span class="badge {% if score > 0 %}bg-success{% elif score < 0 %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {{ cat_name[:15] }}: {{ score }}
+                              </span>
+                            {% endfor %}
+                          </div>
+                        </div>
+                      {% endif %}
+                    </li>
+                  {% else %}
+                    <li class="list-group-item text-danger">
+                      Labour ID {{ lid }} not found in labours list
+                    </li>
+                  {% endif %}
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="alert alert-warning">
+          <strong>No records found</strong> - Try adjusting your filters or clearing dates to see all data.
+        </div>
+      {% endif %}
+    </div>
+    
+    <!-- ==================== Tab 3: Add Labour ==================== -->
+    <div class="tab-pane fade" id="add" role="tabpanel">
+      <h5 class="mb-3">Add New Labour</h5>
+      <form method="POST" action="{{ url_for('add_labour') }}">
+        <div class="row g-3 mb-4">
+          <div class="col-md-4">
+            <label class="form-label">Name *</label>
+            <input type="text" name="name" class="form-control" required autofocus>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Surname *</label>
+            <input type="text" name="surname" class="form-control" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Phone Number</label>
+            <input type="tel" name="phone" class="form-control">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Add Labour</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<!-- JavaScript (unchanged from your last version) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Export function (unchanged)
+function exportReport(format) {
+  const filterLabour = document.querySelector('select[name="filter_labour"]').value;
+  const fromDate     = document.querySelector('input[name="from_date"]').value;
+  const toDate       = document.querySelector('input[name="to_date"]').value;
+
+  let url = "{{ url_for('export_report') }}?format=" + format;
+  if (filterLabour && filterLabour !== 'all') url += "&filter_labour=" + encodeURIComponent(filterLabour);
+  if (fromDate) url += "&from_date=" + encodeURIComponent(fromDate);
+  if (toDate)   url += "&to_date=" + encodeURIComponent(toDate);
+
+  window.location.href = url;
+}
+
+// Break toggle handler (fixed: no reload, immediate UI update)
+function handleBreakToggle(event) {
+  const toggle = event.target;
+  const labourId = toggle.dataset.labourId;
+  const isOn = toggle.checked;
+
+  fetch("{{ url_for('toggle_break') }}", {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labour_id: labourId, is_on: isOn })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      const cell = document.getElementById(`break-cell-${labourId}`);
+      const now = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+
+      if (isOn) {
+        cell.classList.add('break-on');
+        cell.classList.remove('break-off');
+        cell.innerHTML = `
+          <strong>ON</strong><br>
+          <small>since ${now}</small>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input break-toggle" type="checkbox" 
+                   id="break_switch_${labourId}" checked data-labour-id="${labourId}">
+            <label class="form-check-label small" for="break_switch_${labourId}">On break</label>
+          </div>`;
+      } else {
+        cell.classList.remove('break-on');
+        cell.classList.add('break-off');
+        cell.innerHTML = `
+          ${data.total_break} min
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input break-toggle" type="checkbox" 
+                   id="break_switch_${labourId}" data-labour-id="${labourId}">
+            <label class="form-check-label small" for="break_switch_${labourId}">On break</label>
+          </div>`;
+      }
+
+      // Re-attach listener to new toggle
+      const newToggle = cell.querySelector('.break-toggle');
+      if (newToggle) {
+        newToggle.addEventListener('change', handleBreakToggle);
+      }
+    } else {
+      alert("Error: " + (data.message || "Could not toggle break"));
+      toggle.checked = !isOn;
+    }
+  })
+  .catch(error => {
+    console.error('Break toggle error:', error);
+    alert("Failed to update break status");
+    toggle.checked = !isOn;
+  });
+}
+
+// Initialize everything
+document.addEventListener('DOMContentLoaded', function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasFilters = urlParams.has('filter_labour') || 
+                     urlParams.has('from_date') || 
+                     urlParams.has('to_date');
+  
+  if (window.location.hash === '#reports' || hasFilters) {
+    setTimeout(function() {
+      const reportsTab = document.querySelector('#reports-tab');
+      if (reportsTab) {
+        const tab = new bootstrap.Tab(reportsTab);
+        tab.show();
+        window.location.hash = 'reports';
+      }
+    }, 100);
+  }
+
+  const filterForm = document.getElementById('filterForm');
+  if (filterForm) {
+    filterForm.addEventListener('submit', function() {
+      window.location.hash = 'reports';
+    });
+  }
+
+  document.querySelectorAll('.break-toggle').forEach(toggle => {
+    toggle.addEventListener('change', handleBreakToggle);
+  });
+});
+
+window.addEventListener('popstate', function() {
+  if (window.location.hash === '#reports') {
+    const reportsTab = document.querySelector('#reports-tab');
+    if (reportsTab) {
+      const tab = new bootstrap.Tab(reportsTab);
+      tab.show();
+    }
+  }
+});
+</script>
+
+</body>
+</html>
