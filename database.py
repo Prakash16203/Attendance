@@ -1,31 +1,31 @@
 # database.py
 # ────────────────────────────────────────────────────────────────
 # Single file containing: connection, base, and all 8 SQLAlchemy models
+# Optimized for Railway deployment (uses DATABASE_URL env var)
 # ────────────────────────────────────────────────────────────────
 
+import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Date, Numeric, ForeignKey, DateTime, SmallInteger, Text, UniqueConstraint, func
 from sqlalchemy.orm import sessionmaker, scoped_session, relationship, declarative_base
-from dotenv import load_dotenv
-import os
 
-import os
-from dotenv import load_dotenv
+load_dotenv()  # Loads .env only for local dev; ignored on Railway
 
-load_dotenv()  # Loads .env only for local dev
-
-# Railway provides DATABASE_URL automatically when you add Postgres
+# ── Database URL ─────────────────────────────────────────────────
+# Railway automatically sets DATABASE_URL when you add PostgreSQL
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Fallback for local development (when no Railway DATABASE_URL)
+# Fallback for local development only (when running outside Railway)
 if not DATABASE_URL:
     DATABASE_URL = (
         f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
         f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
     )
 
-engine = create_engine(DATABASE_URL, echo=False)  # echo=True for debug SQL
+# Optional debug print (shows which URL is used - remove in production if desired)
+print(f"Using DATABASE_URL: {DATABASE_URL[:60]}...")  # Shortened to hide credentials
 
-
+engine = create_engine(DATABASE_URL, echo=False)  # Change to echo=True for SQL debug
 
 SessionLocal = scoped_session(
     sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -84,6 +84,7 @@ class User(Base):
     role = Column(String(20), default="admin")
     created_at = Column(DateTime, server_default=func.now())
 
+
 class AttendanceRecord(Base):
     __tablename__ = "attendance_records"
     id = Column(Integer, primary_key=True)
@@ -94,7 +95,7 @@ class AttendanceRecord(Base):
     total_points = Column(Integer, default=0)
     total_break_minutes = Column(Integer, default=0)
     frozen = Column(Boolean, default=False)
-    current_break_start = Column(DateTime, nullable=True)  # ← NEW COLUMN ADDED HERE
+    current_break_start = Column(DateTime, nullable=True)  # Added for break tracking
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -102,7 +103,7 @@ class AttendanceRecord(Base):
         UniqueConstraint('labour_id', 'record_date', name='unique_labour_date'),
     )
 
-    # Relationships (unchanged)
+    # Relationships
     labour = relationship("Labour", back_populates="attendance_records")
     category_scores = relationship("CategoryScore", back_populates="attendance_record", cascade="all, delete-orphan")
     feedback_violations = relationship("FeedbackViolation", back_populates="attendance_record", cascade="all, delete-orphan")
